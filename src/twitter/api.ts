@@ -487,3 +487,215 @@ export async function getUserTweets(
     cursor: nextCursor,
   };
 }
+
+/**
+ * Likes 公共 features 参数（取自 X-Archive 参考项目已验证值）
+ */
+const LIKES_FEATURES = {
+  rweb_video_screen_enabled: false,
+  rweb_cashtags_enabled: true,
+  profile_label_improvements_pcf_label_in_post_enabled: true,
+  responsive_web_profile_redirect_enabled: true,
+  rweb_tipjar_consumption_enabled: false,
+  verified_phone_label_enabled: false,
+  creator_subscriptions_tweet_preview_api_enabled: true,
+  responsive_web_graphql_timeline_navigation_enabled: true,
+  responsive_web_graphql_skip_user_profile_image_extensions_enabled: false,
+  premium_content_api_read_enabled: false,
+  communities_web_enable_tweet_community_results_fetch: true,
+  c9s_tweet_anatomy_moderator_badge_enabled: true,
+  responsive_web_grok_analyze_button_fetch_trends_enabled: false,
+  responsive_web_grok_analyze_post_followups_enabled: true,
+  rweb_cashtags_composer_attachment_enabled: true,
+  responsive_web_jetfuel_frame: true,
+  responsive_web_grok_share_attachment_enabled: true,
+  responsive_web_grok_annotations_enabled: true,
+  articles_preview_enabled: true,
+  responsive_web_edit_tweet_api_enabled: true,
+  rweb_conversational_replies_downvote_enabled: false,
+  graphql_is_translatable_rweb_tweet_is_translatable_enabled: true,
+  view_counts_everywhere_api_enabled: true,
+  longform_notetweets_consumption_enabled: true,
+  responsive_web_twitter_article_tweet_consumption_enabled: true,
+  content_disclosure_indicator_enabled: true,
+  content_disclosure_ai_generated_indicator_enabled: true,
+  responsive_web_grok_show_grok_translated_post: true,
+  responsive_web_grok_analysis_button_from_backend: true,
+  post_ctas_fetch_enabled: true,
+  freedom_of_speech_not_reach_fetch_enabled: true,
+  standardized_nudges_misinfo: true,
+  tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled: true,
+  longform_notetweets_rich_text_read_enabled: true,
+  longform_notetweets_inline_media_enabled: false,
+  responsive_web_grok_image_annotation_enabled: true,
+  responsive_web_grok_imagine_annotation_enabled: true,
+  responsive_web_grok_community_note_auto_translation_is_enabled: true,
+  responsive_web_enhance_cards_enabled: false,
+};
+
+/**
+ * 获取指定用户的点赞推文
+ * 备注：传入自己的 userId 返回自己的点赞；传入他人 userId 尝试获取其公开点赞
+ */
+export async function getUserLikes(
+  userId: string,
+  cursor?: string,
+  count = 20,
+): Promise<{
+  twitterPosts: TwitterPost[];
+  cursor: string | null;
+}> {
+  const resp = await request({
+    method: 'GET',
+    url: `https://${HOST}/i/api/graphql/RozQdCp4CilQzrcuU0NY5w/Likes`,
+    responseType: 'json',
+    query: {
+      features: JSON.stringify(LIKES_FEATURES),
+      variables: JSON.stringify({
+        userId,
+        count,
+        cursor,
+        includePromotedContent: false,
+      }),
+    },
+    headers: getCommonHeaders(),
+  });
+  ensureResponse(resp);
+
+  // Likes 响应路径：data.user.result.timeline_v2.timeline.instructions
+  // 兼容回退：data.user.result.timeline.timeline.instructions
+  const pathToInstructions: (data: any) => any = R.pipe(
+    R.path(['data', 'user', 'result', 'timeline_v2', 'timeline', 'instructions']),
+    R.ifElse(
+      R.isNil,
+      R.path(['data', 'user', 'result', 'timeline', 'timeline', 'instructions']),
+      R.identity,
+    ),
+  );
+
+  const twitterPosts = extractPostsFromInstructions(pathToInstructions, resp.body);
+  const nextCursor = extractCursorFromInstructions(pathToInstructions, resp.body);
+
+  if (!twitterPosts || twitterPosts.length === 0) {
+    return { cursor: null, twitterPosts: [] };
+  }
+
+  log.info('getUserLikes posts', twitterPosts);
+  return { twitterPosts, cursor: nextCursor };
+}
+
+/**
+ * 获取当前登录用户的收藏推文（无需 userId）
+ */
+export async function getUserBookmarks(
+  cursor?: string,
+  count = 20,
+): Promise<{
+  twitterPosts: TwitterPost[];
+  cursor: string | null;
+}> {
+  const resp = await request({
+    method: 'GET',
+    url: `https://${HOST}/i/api/graphql/XD0ViOeSOW4YoeNTGjVaYw/Bookmarks`,
+    responseType: 'json',
+    query: {
+      features: JSON.stringify(LIKES_FEATURES),
+      variables: JSON.stringify({
+        count,
+        cursor,
+        includePromotedContent: false,
+      }),
+    },
+    headers: getCommonHeaders(),
+  });
+  ensureResponse(resp);
+
+  // Bookmarks 响应路径：data.bookmark_timeline_v2.timeline.instructions
+  // 兼容回退：data.bookmark_timeline.timeline.instructions
+  const pathToInstructions: (data: any) => any = R.pipe(
+    R.path(['data', 'bookmark_timeline_v2', 'timeline', 'instructions']),
+    R.ifElse(
+      R.isNil,
+      R.path(['data', 'bookmark_timeline', 'timeline', 'instructions']),
+      R.identity,
+    ),
+  );
+
+  const twitterPosts = extractPostsFromInstructions(pathToInstructions, resp.body);
+  const nextCursor = extractCursorFromInstructions(pathToInstructions, resp.body);
+
+  if (!twitterPosts || twitterPosts.length === 0) {
+    return { cursor: null, twitterPosts: [] };
+  }
+
+  log.info('getUserBookmarks posts', twitterPosts);
+  return { twitterPosts, cursor: nextCursor };
+}
+
+/**
+ * 从 Timeline instructions 中提取推文列表（通用逻辑）
+ * 适用于 UserMedia、UserTweets、Likes、Bookmarks 等所有返回 TimelineAddEntries 的接口
+ */
+function extractPostsFromInstructions(
+  pathToInstructions: (data: any) => any,
+  data: any,
+): TwitterPost[] | undefined {
+  const pathToItems = (instructions: any): any => {
+    const pathToModuleItemsFirst = R.pipe(
+      R.find(R.pathEq('TimelineAddEntries', ['type'])),
+      R.defaultTo({}),
+      R.prop('entries'),
+      R.defaultTo([]),
+      R.find(R.pathEq('TimelineTimelineModule', ['content', 'entryType'])),
+      R.defaultTo({}),
+      R.path<any>(['content', 'items']),
+    );
+
+    const pathToModuleItemsMore = R.pipe(
+      R.find(R.pathEq('TimelineAddToModule', ['type'])),
+      R.defaultTo({}),
+      R.prop('moduleItems'),
+    );
+
+    return R.pipe(
+      R.either(pathToModuleItemsFirst, pathToModuleItemsMore),
+      R.defaultTo([]),
+      R.map(
+        R.pipe(
+          R.path(['item', 'itemContent', 'tweet_results', 'result']),
+          R.ifElse<any, any, any>(
+            R.propEq('TweetWithVisibilityResults', '__typename'),
+            R.prop('tweet'),
+            R.identity,
+          ),
+        ),
+      ),
+    )(instructions);
+  };
+
+  return R.pipe(
+    pathToInstructions,
+    R.ifElse(
+      R.isNil,
+      R.always([]),
+      R.pipe(pathToItems, R.filter(R.isNotNil), mapTwitterPosts),
+    ),
+  )(data);
+}
+
+/**
+ * 从 Timeline instructions 中提取下一页游标（通用逻辑）
+ */
+function extractCursorFromInstructions(
+  pathToInstructions: (data: any) => any,
+  data: any,
+): string | null {
+  return R.pipe<any, any, any, any, any, string | undefined, string | null>(
+    pathToInstructions,
+    R.find(R.pathEq('TimelineAddEntries', ['type'])),
+    R.prop('entries'),
+    R.find(R.pathEq('Bottom', ['content', 'cursorType'])),
+    R.path(['content', 'value']),
+    R.defaultTo(null),
+  )(data);
+}

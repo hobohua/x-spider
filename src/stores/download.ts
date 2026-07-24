@@ -9,8 +9,9 @@ import { TwitterMedia } from '../interfaces/TwitterMedia';
 import { TwitterPost } from '../interfaces/TwitterPost';
 import { TwitterUser } from '../interfaces/TwitterUser';
 import { AriaStatus, aria2 } from '../utils/aria2';
-import { getUserMedias, getUserTweets } from '../twitter/api';
+import { getUserMedias, getUserTweets, getUserLikes, getUserBookmarks } from '../twitter/api';
 import { useSettingsStore } from './settings';
+import { useDownloadHistoryStore } from './download-history';
 import { getDownloadUrl } from '../twitter/utils';
 import { resolveVariables } from '../utils/file-name-template';
 import { FileNameTemplateData } from '../interfaces/FileNameTemplateData';
@@ -404,7 +405,12 @@ async function runCreationTask(task: CreationTask, abortSignal: AbortSignal) {
   const until = filter.dateRange?.[1] || now.clone();
   let nextCursor: string | undefined | null = undefined;
 
-  const getListFn = filter.source === 'medias' ? getUserMedias : getUserTweets;
+  // 根据 source 选择对应的 API 函数
+  const getListFn: (userId: string, cursor?: string, count?: number) => Promise<{ twitterPosts: TwitterPost[]; cursor: string | null }>
+    = filter.source === 'medias' ? getUserMedias
+    : filter.source === 'tweets' ? getUserTweets
+    : filter.source === 'likes' ? getUserLikes
+    : getUserTweets; // bookmarks 走自定义调用
 
   const getMediaCounts = R.reduce((acc: number, elem: TwitterPost) => {
     return acc + (elem.medias?.length || 0);
@@ -416,7 +422,20 @@ async function runCreationTask(task: CreationTask, abortSignal: AbortSignal) {
     }
 
     log().info('CreationTask fetching', nextCursor);
-    const { twitterPosts, cursor } = await getListFn(user.id, nextCursor);
+    let twitterPosts: TwitterPost[];
+    let cursor: string | null;
+
+    if (filter.source === 'bookmarks') {
+      // Bookmarks API 不需要 userId
+      const result = await getUserBookmarks(nextCursor);
+      twitterPosts = result.twitterPosts;
+      cursor = result.cursor;
+    } else {
+      const result = await getListFn(user.id, nextCursor);
+      twitterPosts = result.twitterPosts;
+      cursor = result.cursor;
+    }
+
     if (abortSignal.aborted) break;
     nextCursor = cursor;
     now = R.last(twitterPosts)?.createdAt || now;
@@ -450,6 +469,7 @@ async function runCreationTask(task: CreationTask, abortSignal: AbortSignal) {
     }
 
     const paramsList: CreateDownloadTaskParams[] = [];
+    const historyStore = useDownloadHistoryStore.getState();
 
     for (const post of filteredPosts) {
       const filteredMedias = post.medias!.filter(
@@ -463,9 +483,16 @@ async function runCreationTask(task: CreationTask, abortSignal: AbortSignal) {
 
       log().info('FilteredMedias', filteredMedias);
       for (const media of filteredMedias) {
-        const task = await prepareDownloadTask({ post, media });
-        log().info('Prepared download task', task);
-        const filePath = await path.join(task.dir, task.fileName);
+        // [去重] 检查下载历史中是否已存在此 mediaId
+        if (media.id && historyStore.hasMedia(media.id)) {
+          skipCount++;
+          log().info('Skip because already in download history', media.id);
+          continue;
+        }
+
+        const prepared = await prepareDownloadTask({ post, media });
+        log().info('Prepared download task', prepared);
+        const filePath = await path.join(prepared.dir, prepared.fileName);
         log().info('Resolved file path', filePath);
         if (settings.download.sameFileSkip && (await fs.exists(filePath))) {
           skipCount++;
@@ -569,11 +596,38 @@ async function scheduleAutoSyncTasks() {
   const resultMap = await aria2.tellStatus(ids);
   const { downloadTasks, batchUpdateDownloadTasks } =
     useDownloadStore.getState();
+  const historyStore = useDownloadHistoryStore.getState();
   const newTasks = await Promise.all(
     downloadTasks.map<Promise<DownloadTask>>(async (oldTask) => {
       // Do not update status after someone updated it during query
       if (oldTask.updatedAt > now) return oldTask;
       if (!resultMap[oldTask.gid]) return oldTask;
+
+      // 检测任务是否刚从其他状态变成 Complete
+      if (oldTask.status !== AriaStatus.Complete && resultMap[oldTask.gid].status === AriaStatus.Complete) {
+        const completeTask = await mergeAriaStatusToDownloadTask(
+          resultMap[oldTask.gid],
+          oldTask,
+          now,
+        );
+        // 写入下载历史
+        if (oldTask.media.id) {
+          historyStore.addRecord({
+            mediaId: oldTask.media.id,
+            postId: oldTask.post.id,
+            userId: oldTask.post.user.id,
+            userScreenName: oldTask.post.user.screenName,
+            fileName: completeTask.fileName,
+            filePath: await path.join(completeTask.dir, completeTask.fileName),
+            fileSize: completeTask.totalSize,
+            downloadedAt: now,
+            mediaType: oldTask.media.type,
+            source: 'post',
+          });
+        }
+        return completeTask;
+      }
+
       return mergeAriaStatusToDownloadTask(
         resultMap[oldTask.gid],
         oldTask,

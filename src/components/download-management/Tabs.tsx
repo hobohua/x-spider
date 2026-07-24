@@ -9,7 +9,7 @@ import { DownloadTask } from '../../interfaces/DownloadTask';
 export interface Tab {
   name: string;
   children: React.ReactNode;
-  countStatus: AriaStatus[];
+  countStatus?: AriaStatus[];
 }
 
 export interface TabsProps {
@@ -54,13 +54,15 @@ export const Tabs: React.FC<TabsProps> = ({ tabs }) => {
                 )}
               >
                 {tab.name}
-                <span>
-                  (
-                  {R.count<DownloadTask>((t) =>
-                    tab.countStatus.includes(t.status),
-                  )(downloadTasks)}
-                  )
-                </span>
+                {tab.countStatus && (
+                  <span>
+                    (
+                    {R.count<DownloadTask>((t) =>
+                      tab.countStatus!.includes(t.status),
+                    )(downloadTasks)}
+                    )
+                  </span>
+                )}
               </button>
             </div>
           </li>

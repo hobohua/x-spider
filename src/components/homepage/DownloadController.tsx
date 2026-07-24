@@ -100,7 +100,7 @@ export const DownloadController: React.FC = () => {
         <Form.Item
           name="source"
           label="下载源"
-          tooltip="帖子能下载到更早的推文，但爬取速度较慢；媒体可能下载不到更早的推文，但爬取速度更快。"
+          tooltip="帖子能下载到更早的推文，但爬取速度较慢；媒体可能下载不到更早的推文，但爬取速度更快。点赞/收藏仅限当前 Cookie 登录账号有权限访问的数据。"
         >
           <Radio.Group
             options={[
@@ -111,6 +111,14 @@ export const DownloadController: React.FC = () => {
               {
                 label: '媒体',
                 value: 'medias',
+              },
+              {
+                label: '点赞',
+                value: 'likes',
+              },
+              {
+                label: '收藏',
+                value: 'bookmarks',
               },
             ]}
           />

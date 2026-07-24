@@ -5,6 +5,7 @@ import { Tabs } from '../components/download-management/Tabs';
 import { TabDownloading } from '../components/download-management/TabDownloading';
 import { TabError } from '../components/download-management/TabError';
 import { TabComplete } from '../components/download-management/TabComplete';
+import { TabHistory } from '../components/download-management/TabHistory';
 import { AriaStatus } from '../utils/aria2';
 
 export const DownloadManagement: React.FC = () => {
@@ -32,6 +33,10 @@ export const DownloadManagement: React.FC = () => {
               name: '已完成',
               children: <TabComplete />,
               countStatus: [AriaStatus.Complete],
+            },
+            {
+              name: '下载历史',
+              children: <TabHistory />,
             },
           ]}
         />
