@@ -104,10 +104,8 @@ export const useDownloadHistoryStore = create(
       },
 
       getAllRecords: () => {
-        return R.pipe(
-          R.values,
-          R.sort((a, b) => b.downloadedAt - a.downloadedAt),
-        )(get().records);
+        return (Object.values(get().records) as DownloadRecord[])
+          .sort((a, b) => b.downloadedAt - a.downloadedAt);
       },
 
       getTotalCount: () => R.values(get().records).length,

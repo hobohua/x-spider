@@ -12,9 +12,8 @@ import {
   FileTextOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import * as R from 'ramda';
 import { useDownloadHistoryStore } from '../../stores/download-history';
-import { DownloadRecord, DownloadStats } from '../../interfaces/DownloadRecord';
+import { DownloadRecord } from '../../interfaces/DownloadRecord';
 import MediaType from '../../enums/MediaType';
 
 const mediaTypeIcon = (type: MediaType) => {
