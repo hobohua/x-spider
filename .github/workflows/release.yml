@@ -2,8 +2,6 @@ name: Auto release
 on:
   workflow_dispatch:
   push:
-    branches:
-      - master
     tags:
       - 'v*'
 
@@ -18,7 +16,7 @@ jobs:
   release:
     name: Release
     runs-on: windows-latest
-    if: ${{ github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v') }}
+    if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,11 +25,11 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
       - name: Setup PNPM
-        uses: pnpm/action-setup@v3
+        uses: pnpm/action-setup@v4
       - name: Setup NodeJS
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
       - name: Cache Rust Builds
         id: cache-rust-builds
@@ -46,22 +44,15 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
       - name: Install dependencies
         run: pnpm i
-      - name: Bump version
-        id: bumpVersion
-        run: 'pnpm version prerelease -m "chore: Auto release %s"'
       - name: Build
         run: pnpm tauri build
-      - name: Push commits
-        run: git push
-      - name: Push tags
-        run: git push --tags
       - name: Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION=$(git describe --abbrev=0 --tags)
-          gh release create $VERSION ./src-tauri/target/release/bundle/nsis/* --prerelease --notes "该发布为自动构建的预览版本。" --generate-notes --title $VERSION
+          VERSION=${GITHUB_REF_NAME}
+          gh release create $VERSION ./src-tauri/target/release/bundle/nsis/* --notes "自动构建版本 $VERSION" --title $VERSION
       - name: Cleanup Bundles
         run: |
           rm -Recurse -Force src-tauri/target/release/bundle
