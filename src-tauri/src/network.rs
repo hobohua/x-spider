@@ -37,9 +37,7 @@ pub async fn network_fetch(
 
     // Auto set proxy settings
     if enable_proxy {
-      if proxy_url.len() == 0 {
-        // Use system proxy, do nothing
-      } else {
+      if proxy_url.len() > 0 {
         // Use custom proxy url
         let proxy_http = reqwest::Proxy::http(proxy_url.clone()).or(Err("Failed to set proxy url".to_string()))?;
         let proxy_https = reqwest::Proxy::https(proxy_url.clone()).or(Err("Failed to set proxy url".to_string()))?;
@@ -76,7 +74,7 @@ pub async fn network_fetch(
     let reqwest_headers = response.headers();
     let mut h: HashMap<String, Vec<String>> = HashMap::with_capacity(reqwest_headers.len());
 
-    for (k, v) in reqwest_headers {
+    for (k, v) in reqwest_headers.iter() {
       let v = v.to_str();
       if let Err(_) = v {
         continue;
@@ -110,16 +108,16 @@ pub async fn network_fetch(
 }
 
 #[tauri::command]
-pub async fn network_get_system_proxy_url() -> Result<HashMap<String, String>, ()> {
-  let proxies = reqwest::get_system_proxy_map();
-  let mut mapped_proxies: HashMap<String, String> = HashMap::with_capacity(proxies.len());
-
-  for (key, value) in proxies {
-    mapped_proxies.insert(key.clone(), match value {
-      reqwest::ProxyScheme::Http { host, .. } => host.to_string(),
-      reqwest::ProxyScheme::Https { host, .. } => host.to_string(),
-    });
+pub async fn network_get_system_proxy_url() -> Result<HashMap<String, String>, String> {
+  let mut mapped_proxies: HashMap<String, String> = HashMap::new();
+  if let Ok(val) = std::env::var("http_proxy") {
+    mapped_proxies.insert("http".to_string(), val);
   }
-
+  if let Ok(val) = std::env::var("https_proxy") {
+    mapped_proxies.insert("https".to_string(), val);
+  }
+  if let Ok(val) = std::env::var("all_proxy") {
+    mapped_proxies.insert("all".to_string(), val);
+  }
   Ok(mapped_proxies)
 }
