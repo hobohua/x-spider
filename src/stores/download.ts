@@ -437,6 +437,18 @@ async function runCreationTask(task: CreationTask, abortSignal: AbortSignal) {
     }
 
     if (abortSignal.aborted) break;
+
+    // 如果 API 返回了空结果，给出明确提示
+    if (twitterPosts.length === 0) {
+      const sourceName =
+        filter.source === 'likes' ? '点赞' :
+        filter.source === 'bookmarks' ? '收藏' : '推文';
+      antNotification.warning({
+        message: `${sourceName} 没有获取到数据`,
+        description: `可能原因：Cookie 权限不足、该用户没有公开点赞、或该接口需要更新。`,
+      });
+    }
+
     nextCursor = cursor;
     now = R.last(twitterPosts)?.createdAt || now;
     log().info('Now', now.format('YYYY-MM-DD'), 'next cursor', nextCursor);
