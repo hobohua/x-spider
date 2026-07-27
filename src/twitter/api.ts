@@ -634,33 +634,54 @@ export async function getUserBookmarks(
 
 /**
  * 从 Timeline instructions 中提取推文列表（通用逻辑）
- * 适用于 UserMedia、UserTweets、Likes、Bookmarks 等所有返回 TimelineAddEntries 的接口
+ * 兼容三种模式：
+ * 1. TimelineTimelineModule（分组模块，如 UserMedia）
+ * 2. TimelineAddToModule（追加模块）
+ * 3. 独立 tweet 条目（entryId 以 tweet- 开头，如 Likes/Bookmarks）
  */
 function extractPostsFromInstructions(
   pathToInstructions: (data: any) => any,
   data: any,
 ): TwitterPost[] | undefined {
   const pathToItems = (instructions: any): any => {
-    const pathToModuleItemsFirst = R.pipe(
+    const addEntries = R.pipe(
       R.find(R.pathEq('TimelineAddEntries', ['type'])),
       R.defaultTo({}),
       R.prop('entries'),
       R.defaultTo([]),
-      R.find(R.pathEq('TimelineTimelineModule', ['content', 'entryType'])),
-      R.defaultTo({}),
-      R.path<any>(['content', 'items']),
-    );
+    )(instructions);
 
-    const pathToModuleItemsMore = R.pipe(
+    const addToModuleItems = R.pipe(
       R.find(R.pathEq('TimelineAddToModule', ['type'])),
       R.defaultTo({}),
       R.prop('moduleItems'),
-    );
-
-    return R.pipe(
-      R.either(pathToModuleItemsFirst, pathToModuleItemsMore),
       R.defaultTo([]),
-      R.map(
+    )(instructions);
+
+    // 模式1：从 TimelineTimelineModule 中提取（UserMedia 模式）
+    const moduleEntry = R.find(
+      R.pathEq('TimelineTimelineModule', ['content', 'entryType']),
+    )(addEntries);
+    if (moduleEntry) {
+      return R.pipe(
+        R.path<any>(['content', 'items']),
+        R.defaultTo([]),
+        R.map(
+          R.pipe(
+            R.path(['item', 'itemContent', 'tweet_results', 'result']),
+            R.ifElse<any, any, any>(
+              R.propEq('TweetWithVisibilityResults', '__typename'),
+              R.prop('tweet'),
+              R.identity,
+            ),
+          ),
+        ),
+      )(moduleEntry);
+    }
+
+    // 模式2：从 TimelineAddToModule 中提取
+    if (addToModuleItems.length > 0) {
+      return R.map(
         R.pipe(
           R.path(['item', 'itemContent', 'tweet_results', 'result']),
           R.ifElse<any, any, any>(
@@ -669,8 +690,26 @@ function extractPostsFromInstructions(
             R.identity,
           ),
         ),
-      ),
-    )(instructions);
+      )(addToModuleItems);
+    }
+
+    // 模式3：从独立 tweet 条目中提取（Likes/Bookmarks 模式）
+    return R.pipe(
+      R.filter<any>((entry: any) => {
+        const entryId: string = entry.entryId || '';
+        return entryId.startsWith('tweet-') || entryId.startsWith('sq-I-t-');
+      }),
+      R.map<any, any>((entry: any) => {
+        const result = R.path(
+          ['content', 'itemContent', 'tweet_results', 'result'],
+          entry,
+        );
+        if (R.propEq('TweetWithVisibilityResults', '__typename')(result)) {
+          return result?.tweet;
+        }
+        return result;
+      }),
+    )(addEntries);
   };
 
   return R.pipe(
@@ -685,17 +724,40 @@ function extractPostsFromInstructions(
 
 /**
  * 从 Timeline instructions 中提取下一页游标（通用逻辑）
+ * 兼容两种模式：
+ * 1. cursorType = 'Bottom'（标准）
+ * 2. entryId 以 cursor-bottom- 开头（备用）
  */
 function extractCursorFromInstructions(
   pathToInstructions: (data: any) => any,
   data: any,
 ): string | null {
-  return R.pipe<any, any, any, any, any, string | undefined, string | null>(
+  const entries: any[] | undefined = R.pipe(
     pathToInstructions,
     R.find(R.pathEq('TimelineAddEntries', ['type'])),
+    R.defaultTo({}),
     R.prop('entries'),
-    R.find(R.pathEq('Bottom', ['content', 'cursorType'])),
-    R.path(['content', 'value']),
-    R.defaultTo(null),
   )(data);
+
+  if (!entries) return null;
+
+  // 模式1：cursorType = 'Bottom'
+  const byCursorType = R.find(R.pathEq('Bottom', ['content', 'cursorType']))(entries);
+  if (byCursorType) {
+    return R.path(['content', 'value'], byCursorType) ?? null;
+  }
+
+  // 模式2：entryId 以 cursor-bottom- 开头
+  const byEntryId = R.find((entry: any) => {
+    const entryId: string = entry.entryId || '';
+    return entryId.startsWith('cursor-bottom-');
+  })(entries);
+
+  if (byEntryId) {
+    return R.path(['content', 'value'], byEntryId)
+      ?? R.path(['content', 'itemContent', 'value'], byEntryId)
+      ?? null;
+  }
+
+  return null;
 }
