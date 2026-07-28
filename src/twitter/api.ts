@@ -545,26 +545,27 @@ export async function getUserLikes(
   twitterPosts: TwitterPost[];
   cursor: string | null;
 }> {
-  const resp = await request({
-    method: 'GET',
-    url: `https://${HOST}/i/api/graphql/RozQdCp4CilQzrcuU0NY5w/Likes`,
-    responseType: 'json',
-    query: {
-      features: JSON.stringify(LIKES_FEATURES),
-      variables: JSON.stringify({
-        userId,
-        count,
-        cursor,
-        includePromotedContent: false,
-      }),
-    },
-    headers: getCommonHeaders(),
-  });
-  ensureResponse(resp);
+  try {
+    const resp = await request({
+      method: 'GET',
+      url: `https://${HOST}/i/api/graphql/RozQdCp4CilQzrcuU0NY5w/Likes`,
+      responseType: 'json',
+      query: {
+        features: JSON.stringify(LIKES_FEATURES),
+        variables: JSON.stringify({
+          userId,
+          count,
+          cursor,
+          includePromotedContent: false,
+        }),
+      },
+      headers: getCommonHeaders(),
+    });
+    ensureResponse(resp);
 
-  // Likes 响应路径：data.user.result.timeline_v2.timeline.instructions
-  // 兼容回退：data.user.result.timeline.timeline.instructions
-  const pathToInstructions: (data: any) => any = R.pipe(
+    // Likes 响应路径：data.user.result.timeline_v2.timeline.instructions
+    // 兼容回退：data.user.result.timeline.timeline.instructions
+    const pathToInstructions: (data: any) => any = R.pipe(
     R.path(['data', 'user', 'result', 'timeline_v2', 'timeline', 'instructions']),
     R.ifElse(
       R.isNil,
@@ -582,6 +583,17 @@ export async function getUserLikes(
 
   log.info('getUserLikes posts', twitterPosts);
   return { twitterPosts, cursor: nextCursor };
+  } catch (err: any) {
+    log.error('getUserLikes error', err);
+    const reason = typeof err === 'string' ? err : err?.message || '未知错误';
+    // 通过 antd notification 通知用户
+    const { notification } = await import('antd');
+    notification.error({
+      message: '点赞接口请求失败',
+      description: reason,
+    });
+    return { cursor: null, twitterPosts: [] };
+  }
 }
 
 /**
@@ -594,21 +606,22 @@ export async function getUserBookmarks(
   twitterPosts: TwitterPost[];
   cursor: string | null;
 }> {
-  const resp = await request({
-    method: 'GET',
-    url: `https://${HOST}/i/api/graphql/XD0ViOeSOW4YoeNTGjVaYw/Bookmarks`,
-    responseType: 'json',
-    query: {
-      features: JSON.stringify(LIKES_FEATURES),
-      variables: JSON.stringify({
-        count,
-        cursor,
-        includePromotedContent: false,
-      }),
-    },
-    headers: getCommonHeaders(),
-  });
-  ensureResponse(resp);
+  try {
+    const resp = await request({
+      method: 'GET',
+      url: `https://${HOST}/i/api/graphql/XD0ViOeSOW4YoeNTGjVaYw/Bookmarks`,
+      responseType: 'json',
+      query: {
+        features: JSON.stringify(LIKES_FEATURES),
+        variables: JSON.stringify({
+          count,
+          cursor,
+          includePromotedContent: false,
+        }),
+      },
+      headers: getCommonHeaders(),
+    });
+    ensureResponse(resp);
 
   // Bookmarks 响应路径：data.bookmark_timeline_v2.timeline.instructions
   // 兼容回退：data.bookmark_timeline.timeline.instructions
@@ -630,6 +643,16 @@ export async function getUserBookmarks(
 
   log.info('getUserBookmarks posts', twitterPosts);
   return { twitterPosts, cursor: nextCursor };
+  } catch (err: any) {
+    log.error('getUserBookmarks error', err);
+    const reason = typeof err === 'string' ? err : err?.message || '未知错误';
+    const { notification } = await import('antd');
+    notification.error({
+      message: '收藏接口请求失败',
+      description: reason,
+    });
+    return { cursor: null, twitterPosts: [] };
+  }
 }
 
 /**
